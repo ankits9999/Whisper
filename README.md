@@ -14,88 +14,58 @@ A real-time speech-to-text live captions webapp powered by **ElevenLabs Scribe R
 - One-click Start/Stop
 
 > **Why a Node.js server?**  
-> The ElevenLabs WebSocket API authenticates via the `xi-api-key` **HTTP header**. Browsers cannot set custom headers on WebSocket connections, so a lightweight proxy server is required to inject the key securely. Azure App Service (free F1 tier) supports this perfectly.
+> The ElevenLabs WebSocket API authenticates via the `xi-api-key` **HTTP header**. Browsers cannot set custom headers on WebSocket connections, so a lightweight proxy server injects the key securely server-side.
 
 ---
 
-## 🚀 Deploy to Azure App Service (Free F1 tier)
+## 🐳 Docker (recommended)
 
-### Prerequisites
-
-```bash
-npm install -g @azure/static-web-apps-cli   # optional, for local Azure emulation
-az extension add --name webapp              # if not already installed
-```
-
-### Step 1 — Add your API key and push to GitHub
+### Run with a single command
 
 ```bash
-# Never commit your real .env — set the key as an Azure App Setting instead
-git init && git add . && git commit -m "Initial commit"
-gh repo create livecaptions --public --push   # or push to existing repo
+docker run -d \
+  --name livecaptions \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -e ELEVENLABS_API_KEY=your_api_key_here \
+  livecaptions
 ```
 
-### Step 2 — Create and deploy to Azure App Service
+Then open **http://localhost:3000** (or replace `localhost` with your VM's IP).
+
+### Build and run with Docker Compose
 
 ```bash
-az login
+cp .env.example .env
+# Edit .env and set ELEVENLABS_API_KEY=your_key_here
 
-# Create resource group
-az group create --name livecaptions-rg --location westeurope
-
-# Create free App Service plan (F1)
-az appservice plan create \
-  --name livecaptions-plan \
-  --resource-group livecaptions-rg \
-  --sku F1 --is-linux
-
-# Create the web app (Node 20)
-az webapp create \
-  --name livecaptions \
-  --resource-group livecaptions-rg \
-  --plan livecaptions-plan \
-  --runtime "NODE:20-lts"
-
-# Set your ElevenLabs API key as an environment variable (never in source code)
-az webapp config appsettings set \
-  --name livecaptions \
-  --resource-group livecaptions-rg \
-  --settings ELEVENLABS_API_KEY="your_api_key_here"
-
-# Enable WebSocket support (required!)
-az webapp config set \
-  --name livecaptions \
-  --resource-group livecaptions-rg \
-  --web-sockets-enabled true
-
-# Deploy from local folder
-az webapp up \
-  --name livecaptions \
-  --resource-group livecaptions-rg \
-  --runtime "NODE:20-lts"
+docker compose up -d --build
 ```
 
-Your app will be live at `https://livecaptions.azurewebsites.net`
+### Build the image manually
 
-### Step 3 — Set startup command
-
-In Azure Portal → your web app → **Configuration → General settings → Startup Command**:
-
-```
-node server.js
-```
-
-Or via CLI:
 ```bash
-az webapp config set \
+docker build -t livecaptions .
+
+docker run -d \
   --name livecaptions \
-  --resource-group livecaptions-rg \
-  --startup-file "node server.js"
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -e ELEVENLABS_API_KEY=your_api_key_here \
+  livecaptions
+```
+
+### Useful commands
+
+```bash
+docker logs -f livecaptions        # stream logs
+docker compose down                # stop and remove container
+docker compose up -d --build       # rebuild after code changes
 ```
 
 ---
 
-## 🖥️ Local development
+## 🖥️ Local development (without Docker)
 
 ```bash
 cp .env.example .env
@@ -111,7 +81,7 @@ npm start
 ## How it works
 
 ```
-Microphone → Browser (PCM 16kHz chunks via WebSocket)
+Microphone → Browser (native-rate PCM chunks via WebSocket)
     → Node.js proxy on /transcribe
     → ElevenLabs WebSocket (with xi-api-key header — server-side only)
     ← partial_transcript / committed_transcript events

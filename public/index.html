@@ -425,7 +425,19 @@
 
     const lang = localStorage.getItem(LS_LANG) || '';
     const vad  = localStorage.getItem(LS_VAD)  || '0.8';
-    const params = new URLSearchParams({ language_code: lang, vad_silence_threshold_secs: vad });
+
+    // Probe the true native sample rate — browsers often ignore requests for 16 kHz
+    // and use the device-native rate (44100 or 48000). Sending audio at the wrong
+    // rate causes ElevenLabs to close immediately with code 1000.
+    const probeCtx = new AudioContext();
+    const nativeSampleRate = probeCtx.sampleRate;
+    await probeCtx.close();
+
+    const params = new URLSearchParams({
+      language_code: lang,
+      vad_silence_threshold_secs: vad,
+      sample_rate: nativeSampleRate,
+    });
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/transcribe?${params}`);
@@ -444,8 +456,14 @@
       }
     };
 
-    await waitForSessionStart();
-    startMic();
+    try {
+      await waitForSessionStart();
+    } catch (err) {
+      showError('Failed to connect: ' + err.message);
+      stopListening();
+      return;
+    }
+    startMic(nativeSampleRate);
     isListening = true;
     toggleBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Stop';
     toggleBtn.className = 'stop';
@@ -457,16 +475,29 @@
   }
 
   function waitForSessionStart() {
-    return new Promise((resolve) => {
-      const orig = ws.onmessage;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        ws.onmessage = (evt) => handleMessage(JSON.parse(evt.data));
+        reject(new Error('Timed out waiting for session_started'));
+      }, 8000);
+
       ws.onmessage = (evt) => {
         const msg = JSON.parse(evt.data);
         if (msg.message_type === 'session_started') {
-          ws.onmessage = orig;
+          clearTimeout(timeout);
+          ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
           resolve();
         } else {
-          orig && orig(evt);
+          handleMessage(msg); // handle auth_error etc. before session starts
         }
+      };
+
+      // If the socket closes before session_started, reject instead of hanging
+      const origClose = ws.onclose;
+      ws.onclose = (evt) => {
+        clearTimeout(timeout);
+        origClose && origClose(evt);
+        reject(new Error(`Connection closed before session started (code ${evt.code})`));
       };
     });
   }
@@ -489,8 +520,8 @@
     toggleBtn.disabled = false;
   }
 
-  function startMic() {
-    audioContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+  function startMic(sampleRate) {
+    audioContext = new AudioContext({ sampleRate });
     const source = audioContext.createMediaStreamSource(mediaStream);
     scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
     analyser = audioContext.createAnalyser();
