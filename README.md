@@ -1,4 +1,4 @@
-# LiveCaptions 🎙️
+# Whisper 🎙️
 
 A real-time speech-to-text live captions webapp powered by **ElevenLabs Scribe Realtime v2** — designed to help people with hearing loss communicate.
 
