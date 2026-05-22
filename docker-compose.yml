@@ -1,0 +1,9 @@
+services:
+  livecaptions:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - PORT=3000
+    restart: unless-stopped

@@ -12,73 +12,98 @@ A real-time speech-to-text live captions webapp powered by **ElevenLabs Scribe R
 - Auto-scroll to latest caption
 - Clear button to reset the screen
 - One-click Start/Stop
-- API key stored in `localStorage` — enter once, always remembered
+
+> **Why a Node.js server?**  
+> The ElevenLabs WebSocket API authenticates via the `xi-api-key` **HTTP header**. Browsers cannot set custom headers on WebSocket connections, so a lightweight proxy server is required to inject the key securely. Azure App Service (free F1 tier) supports this perfectly.
 
 ---
 
-## 🚀 Deploy to Azure Static Web Apps (Free)
+## 🚀 Deploy to Azure App Service (Free F1 tier)
 
 ### Prerequisites
-- [Azure account](https://azure.microsoft.com/free/) (free tier works)
-- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) installed
-- [Static Web Apps CLI](https://azure.github.io/static-web-apps-cli/): `npm install -g @azure/static-web-apps-cli`
-
-### Option A — Azure Portal (no CLI needed)
-
-1. Go to [portal.azure.com](https://portal.azure.com) → **Create a resource** → **Static Web App**
-2. Choose **Free** plan
-3. Connect your GitHub repo (push this project to GitHub first)
-4. Set **App location** to `/public` and leave **API location** empty
-5. Click **Review + Create**
-
-Azure will add a GitHub Actions workflow and auto-deploy on every push.
-
-### Option B — Azure CLI
 
 ```bash
-# 1. Login
-az login
-
-# 2. Create resource group
-az group create --name livecaptions-rg --location westeurope
-
-# 3. Create the Static Web App
-az staticwebapp create \
-  --name livecaptions \
-  --resource-group livecaptions-rg \
-  --location westeurope \
-  --sku Free
-
-# 4. Deploy (from the project root)
-swa deploy ./public \
-  --deployment-token $(az staticwebapp secrets list \
-      --name livecaptions \
-      --resource-group livecaptions-rg \
-      --query "properties.apiKey" -o tsv)
+npm install -g @azure/static-web-apps-cli   # optional, for local Azure emulation
+az extension add --name webapp              # if not already installed
 ```
 
-Your app will be live at `https://livecaptions.azurestaticapps.net` (or similar).
+### Step 1 — Add your API key and push to GitHub
 
-### After deploying
+```bash
+# Never commit your real .env — set the key as an Azure App Setting instead
+git init && git add . && git commit -m "Initial commit"
+gh repo create livecaptions --public --push   # or push to existing repo
+```
 
-1. Open the URL in your browser
-2. Click ⚙️ **Settings** (opens automatically on first visit)
-3. Paste your ElevenLabs API key — it's saved in `localStorage`, never leaves your browser except to ElevenLabs directly
-4. Click **Save**, then **Start Listening**
+### Step 2 — Create and deploy to Azure App Service
+
+```bash
+az login
+
+# Create resource group
+az group create --name livecaptions-rg --location westeurope
+
+# Create free App Service plan (F1)
+az appservice plan create \
+  --name livecaptions-plan \
+  --resource-group livecaptions-rg \
+  --sku F1 --is-linux
+
+# Create the web app (Node 20)
+az webapp create \
+  --name livecaptions \
+  --resource-group livecaptions-rg \
+  --plan livecaptions-plan \
+  --runtime "NODE:20-lts"
+
+# Set your ElevenLabs API key as an environment variable (never in source code)
+az webapp config appsettings set \
+  --name livecaptions \
+  --resource-group livecaptions-rg \
+  --settings ELEVENLABS_API_KEY="your_api_key_here"
+
+# Enable WebSocket support (required!)
+az webapp config set \
+  --name livecaptions \
+  --resource-group livecaptions-rg \
+  --web-sockets-enabled true
+
+# Deploy from local folder
+az webapp up \
+  --name livecaptions \
+  --resource-group livecaptions-rg \
+  --runtime "NODE:20-lts"
+```
+
+Your app will be live at `https://livecaptions.azurewebsites.net`
+
+### Step 3 — Set startup command
+
+In Azure Portal → your web app → **Configuration → General settings → Startup Command**:
+
+```
+node server.js
+```
+
+Or via CLI:
+```bash
+az webapp config set \
+  --name livecaptions \
+  --resource-group livecaptions-rg \
+  --startup-file "node server.js"
+```
 
 ---
 
 ## 🖥️ Local development
 
 ```bash
+cp .env.example .env
+# Edit .env → set ELEVENLABS_API_KEY=your_key_here
+
 npm install
-npm start        # starts on http://localhost:3000
-```
-
-Or use the SWA CLI to emulate Azure locally:
-
-```bash
-swa start ./public
+npm start
+# Open http://localhost:3000
 ```
 
 ---
@@ -86,18 +111,19 @@ swa start ./public
 ## How it works
 
 ```
-Microphone → Browser (PCM 16kHz base64)
-    → WebSocket (wss://api.elevenlabs.io) with xi-api-key query param
+Microphone → Browser (PCM 16kHz chunks via WebSocket)
+    → Node.js proxy on /transcribe
+    → ElevenLabs WebSocket (with xi-api-key header — server-side only)
     ← partial_transcript / committed_transcript events
     → Display on screen
 ```
 
-The app connects **directly from the browser** to ElevenLabs — no server needed. The API key is stored in `localStorage` and sent as a URL query parameter (`xi-api-key=...`), which is the standard approach for WebSocket authentication in browser environments.
+The API key lives **only on the server** and is never sent to the browser.
 
 ---
 
 ## Tips
 
-- **Font size**: Use the `+` and `−` buttons; font size preference is saved
+- **Font size**: Use the `+` and `−` buttons; preference is saved in browser
 - **Language**: Auto-detects by default; override in ⚙️ Settings
-- **Silence sensitivity**: Default 0.8s — captions finalise after 0.8s of silence; adjustable in Settings
+- **Silence sensitivity**: Default 0.8s — captions finalise after 0.8s of silence; adjustable in ⚙️ Settings
