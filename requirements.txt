@@ -1,0 +1,9 @@
+# Python dependencies for the IndicConformer ASR microservice
+#
+# Install order matters — run setup_asr.sh instead of pip install -r directly.
+# That script installs PyTorch first and the AI4Bharat NeMo fork before these.
+
+websockets>=11.0
+numpy>=1.24
+scipy>=1.11
+soundfile>=0.12.1

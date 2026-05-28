@@ -1,2 +1,9 @@
 .env
 node_modules/
+NeMo/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.git/
