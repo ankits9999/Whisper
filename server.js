@@ -124,7 +124,8 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
   }
 
   // Sarvam expects `unknown` (auto-detect) or BCP-47 like `hi-IN`.
-  const sarvamLang = languageCode ? `${languageCode}-IN` : 'unknown';
+  // Default to hi-IN for Hindi+English bilingual speech common in India.
+  const sarvamLang = languageCode ? `${languageCode}-IN` : 'hi-IN';
   // Map our 0.3–3.0s threshold to Sarvam's binary high_vad_sensitivity flag:
   // high sensitivity ≈ 0.5s silence boundary; low ≈ 1s.
   const highVad = parseFloat(vadThreshold) <= 0.7 ? 'true' : 'false';
