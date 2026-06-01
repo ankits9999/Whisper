@@ -1,7 +1,7 @@
 {
   "name": "live-captions",
   "version": "1.0.0",
-  "description": "Live captions app using ElevenLabs Scribe Realtime v2",
+  "description": "Live captions app — supports ElevenLabs Scribe Realtime v2 and Sarvam AI Saarika",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

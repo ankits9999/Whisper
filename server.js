@@ -10,6 +10,7 @@ const wss = new WebSocketServer({ server, path: '/transcribe' });
 
 const PORT = process.env.PORT || 3000;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+const SARVAM_API_KEY = process.env.SARVAM_API_KEY;
 
 const SAMPLE_RATE_FORMAT_MAP = {
   8000:  'pcm_8000',
@@ -28,18 +29,26 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 wss.on('connection', (clientWs, req) => {
   const url = new URL(req.url, `http://localhost`);
+  const provider     = (url.searchParams.get('provider') || 'sarvam').toLowerCase();
   const languageCode = url.searchParams.get('language_code') || '';
   const vadThreshold = url.searchParams.get('vad_silence_threshold_secs') || '0.8';
   const sampleRate   = parseInt(url.searchParams.get('sample_rate') || '16000', 10);
-  const audioFormat  = sampleRateToFormat(sampleRate);
 
-  console.log(`[Client] Connected — sample rate: ${sampleRate} Hz → audio_format: ${audioFormat}`);
+  console.log(`[Client] Connected — provider: ${provider}, sample rate: ${sampleRate} Hz`);
+
+  if (provider === 'sarvam') {
+    handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate });
+  } else {
+    handleElevenLabs(clientWs, { languageCode, vadThreshold, sampleRate });
+  }
+});
+
+// ─── ElevenLabs (streaming WebSocket) ────────────────────────────────────────
+function handleElevenLabs(clientWs, { languageCode, vadThreshold, sampleRate }) {
+  const audioFormat = sampleRateToFormat(sampleRate);
 
   if (!ELEVENLABS_API_KEY) {
-    clientWs.send(JSON.stringify({
-      message_type: 'error',
-      message: 'ELEVENLABS_API_KEY is not set. Please add it to your .env and restart.'
-    }));
+    sendError(clientWs, 'ELEVENLABS_API_KEY is not set. Please add it to your .env and restart.');
     clientWs.close();
     return;
   }
@@ -53,7 +62,6 @@ wss.on('connection', (clientWs, req) => {
   if (languageCode) params.set('language_code', languageCode);
 
   const elevenLabsUrl = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?${params.toString()}`;
-
   const elevenWs = new WebSocket(elevenLabsUrl, {
     headers: { 'xi-api-key': ELEVENLABS_API_KEY }
   });
@@ -71,9 +79,7 @@ wss.on('connection', (clientWs, req) => {
 
   elevenWs.on('error', (err) => {
     console.error('[ElevenLabs] Error:', err.message);
-    if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.send(JSON.stringify({ message_type: 'error', message: err.message }));
-    }
+    sendError(clientWs, err.message);
   });
 
   elevenWs.on('close', (code, reason) => {
@@ -83,9 +89,6 @@ wss.on('connection', (clientWs, req) => {
 
   clientWs.on('message', (data, isBinary) => {
     if (elevenWs.readyState === WebSocket.OPEN) {
-      // Preserve frame type: ws delivers text frames as Buffers, but sending a
-      // Buffer causes ws to emit a binary frame. ElevenLabs closes immediately
-      // on unexpected binary frames for JSON control messages.
       elevenWs.send(isBinary ? data : data.toString('utf8'));
     }
   });
@@ -99,11 +102,167 @@ wss.on('connection', (clientWs, req) => {
     console.error('[Client] Error:', err.message);
     if (elevenWs.readyState === WebSocket.OPEN) elevenWs.close();
   });
-});
+}
+
+// ─── Sarvam (Saaras v3 streaming WebSocket) ─────────────────────────────────
+//
+// Sarvam's streaming endpoint accepts WAV-wrapped, base64-encoded PCM chunks
+// inside a JSON envelope, and emits `{type: "data", data: {transcript}}`
+// messages whenever its server-side VAD finalises an utterance. The per-message
+// `sample_rate` field is enum-restricted to 16000/22050/24000, so we resample
+// the browser's native-rate PCM (44.1k/48k) down to 16 kHz before sending.
+const SARVAM_WS_URL = 'wss://api.sarvam.ai/speech-to-text/ws';
+const SARVAM_TARGET_RATE = 16000;
+
+function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
+  if (!SARVAM_API_KEY) {
+    sendError(clientWs, 'SARVAM_API_KEY is not set. Please add it to your .env and restart.');
+    clientWs.close();
+    return;
+  }
+
+  // Sarvam expects `unknown` (auto-detect) or BCP-47 like `hi-IN`.
+  const sarvamLang = languageCode ? `${languageCode}-IN` : 'unknown';
+  // Map our 0.3–3.0s threshold to Sarvam's binary high_vad_sensitivity flag:
+  // high sensitivity ≈ 0.5s silence boundary; low ≈ 1s.
+  const highVad = parseFloat(vadThreshold) <= 0.7 ? 'true' : 'false';
+
+  const params = new URLSearchParams({
+    'language-code': sarvamLang,
+    model: 'saaras:v3',
+    mode: 'transcribe',
+    sample_rate: String(SARVAM_TARGET_RATE),
+    input_audio_codec: 'audio/wav',
+    high_vad_sensitivity: highVad,
+  });
+  const sarvamUrl = `${SARVAM_WS_URL}?${params.toString()}`;
+  // Sarvam accepts auth either as an `Api-Subscription-Key` HTTP header OR
+  // smuggled through the WebSocket subprotocol field as
+  // `api-subscription-key.<KEY>` — the latter is what their own browser demo
+  // uses (browsers can't set custom WS headers). The subprotocol approach
+  // works equally well server-side and matches their official client, so we
+  // use it here.
+  const sarvamWs = new WebSocket(sarvamUrl, [`api-subscription-key.${SARVAM_API_KEY}`]);
+
+  sarvamWs.on('open', () => {
+    clientWs.send(JSON.stringify({ message_type: 'session_started' }));
+    console.log(`[Sarvam] Connected — language: ${sarvamLang}, high_vad_sensitivity: ${highVad}`);
+  });
+
+  sarvamWs.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString('utf8')); } catch { return; }
+
+    if (msg.type === 'data' && msg.data && msg.data.transcript) {
+      const text = msg.data.transcript.trim();
+      if (text && clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({ message_type: 'committed_transcript', text }));
+      }
+    } else if (msg.type === 'error') {
+      sendError(clientWs, (msg.data && (msg.data.message || msg.data.error)) || 'Sarvam streaming error');
+    }
+    // `events` (speech_start / speech_end) are ignored — UI doesn't need them.
+  });
+
+  sarvamWs.on('error', (err) => {
+    console.error('[Sarvam] WS error:', err.message);
+    sendError(clientWs, err.message);
+  });
+
+  sarvamWs.on('close', (code, reason) => {
+    console.log(`[Sarvam] Closed (${code}): ${reason.toString()}`);
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
+  });
+
+  clientWs.on('message', (data) => {
+    if (sarvamWs.readyState !== WebSocket.OPEN) return;
+    let msg;
+    try { msg = JSON.parse(data.toString('utf8')); } catch { return; }
+    if (msg.message_type !== 'input_audio_chunk' || !msg.audio_base_64) return;
+
+    const pcmIn = new Int16Array(Buffer.from(msg.audio_base_64, 'base64').buffer);
+    if (pcmIn.length === 0) return;
+
+    const pcm16k = resampleInt16(pcmIn, sampleRate, SARVAM_TARGET_RATE);
+    const wav = pcmToWav(pcm16k, SARVAM_TARGET_RATE);
+    sarvamWs.send(JSON.stringify({
+      audio: {
+        data: wav.toString('base64'),
+        sample_rate: String(SARVAM_TARGET_RATE),
+        encoding: 'audio/wav',
+      }
+    }));
+  });
+
+  clientWs.on('close', () => {
+    console.log('[Client] Disconnected');
+    if (sarvamWs.readyState === WebSocket.OPEN) {
+      try { sarvamWs.send(JSON.stringify({ type: 'flush' })); } catch {}
+      sarvamWs.close();
+    }
+  });
+
+  clientWs.on('error', (err) => {
+    console.error('[Client] Error:', err.message);
+    if (sarvamWs.readyState === WebSocket.OPEN) sarvamWs.close();
+  });
+}
+
+// Linear-interp downsampler. Adequate for speech captions; for music we'd
+// want a proper low-pass + decimator, but voice content above 8 kHz carries
+// negligible information so simple interp is fine here.
+function resampleInt16(input, fromRate, toRate) {
+  if (fromRate === toRate) return input;
+  const ratio = fromRate / toRate;
+  const outLen = Math.floor(input.length / ratio);
+  const out = new Int16Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const srcIdx = i * ratio;
+    const i0 = Math.floor(srcIdx);
+    const i1 = Math.min(i0 + 1, input.length - 1);
+    const frac = srcIdx - i0;
+    out[i] = input[i0] * (1 - frac) + input[i1] * frac;
+  }
+  return out;
+}
+
+function pcmToWav(int16, sampleRate) {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+  const blockAlign = numChannels * bitsPerSample / 8;
+  const dataSize = int16.length * 2;
+  const buf = Buffer.alloc(44 + dataSize);
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + dataSize, 4);
+  buf.write('WAVE', 8);
+  buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);              // PCM
+  buf.writeUInt16LE(numChannels, 22);
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(byteRate, 28);
+  buf.writeUInt16LE(blockAlign, 32);
+  buf.writeUInt16LE(bitsPerSample, 34);
+  buf.write('data', 36);
+  buf.writeUInt32LE(dataSize, 40);
+  Buffer.from(int16.buffer, int16.byteOffset, int16.byteLength).copy(buf, 44);
+  return buf;
+}
+
+function sendError(clientWs, message) {
+  if (clientWs.readyState === WebSocket.OPEN) {
+    clientWs.send(JSON.stringify({ message_type: 'error', message }));
+  }
+}
 
 server.listen(PORT, () => {
   console.log(`\n🎙️  LiveCaptions running at http://localhost:${PORT}\n`);
   if (!ELEVENLABS_API_KEY) {
-    console.warn('⚠️  ELEVENLABS_API_KEY not set. Copy .env.example to .env and add your key.\n');
+    console.warn('⚠️  ELEVENLABS_API_KEY not set — ElevenLabs provider will fail.');
   }
+  if (!SARVAM_API_KEY) {
+    console.warn('⚠️  SARVAM_API_KEY not set — Sarvam provider will fail.');
+  }
+  console.log('');
 });

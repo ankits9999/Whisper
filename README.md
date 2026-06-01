@@ -1,6 +1,11 @@
 # Whisper 🎙️
 
-A real-time speech-to-text live captions webapp powered by **ElevenLabs Scribe Realtime v2** — designed to help people with hearing loss communicate.
+A real-time speech-to-text live captions webapp — designed to help people with hearing loss communicate.
+
+Supports two transcription providers, switchable from the ⚙️ Settings panel:
+
+- **ElevenLabs Scribe Realtime v2** *(default)* — streaming WebSocket with live partial transcripts
+- **Sarvam AI Saaras v3** — streaming WebSocket optimised for 10+ Indic languages; emits a finalised transcript per VAD-bounded utterance (no incremental partials)
 
 ## Features
 
@@ -14,7 +19,18 @@ A real-time speech-to-text live captions webapp powered by **ElevenLabs Scribe R
 - One-click Start/Stop
 
 > **Why a Node.js server?**  
-> The ElevenLabs WebSocket API authenticates via the `xi-api-key` **HTTP header**. Browsers cannot set custom headers on WebSocket connections, so a lightweight proxy server injects the key securely server-side.
+> The provider APIs authenticate via HTTP headers (`xi-api-key` for ElevenLabs, `api-subscription-key` for Sarvam). Browsers cannot set custom headers on WebSocket/cross-origin requests, so a lightweight proxy server injects the keys securely server-side.
+
+## API keys
+
+Set whichever providers you want to use in `.env` (see `.env.example`):
+
+```
+ELEVENLABS_API_KEY=...   # get from https://elevenlabs.io
+SARVAM_API_KEY=...       # get from https://dashboard.sarvam.ai
+```
+
+You only need the key for the provider(s) you actually enable. Pick the provider from **⚙️ Settings → Provider** in the UI.
 
 ---
 

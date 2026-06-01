@@ -288,6 +288,15 @@
     <h2>⚙️ Settings</h2>
 
     <div class="field">
+      <label for="provider-select">Provider</label>
+      <select id="provider-select">
+        <option value="sarvam">Sarvam (Indic, segment-based)</option>
+        <option value="elevenlabs">ElevenLabs (streaming, partials)</option>
+      </select>
+      <p class="hint">Sarvam transcribes per silence-bounded segment — no live partials.</p>
+    </div>
+
+    <div class="field">
       <label for="lang-select">Language <em style="font-weight:normal;">(optional)</em></label>
       <select id="lang-select">
         <option value="">Auto-detect</option>
@@ -337,6 +346,7 @@
   const LS_LANG     = 'livecaptions_lang';
   const LS_VAD      = 'livecaptions_vad';
   const LS_FONTSIZE = 'livecaptions_fontsize';
+  const LS_PROVIDER = 'livecaptions_provider';
 
   let ws = null;
   let mediaStream = null;
@@ -368,6 +378,7 @@
   const settingsSave    = document.getElementById('settings-save');
   const langSelect      = document.getElementById('lang-select');
   const vadInput        = document.getElementById('vad-input');
+  const providerSelect  = document.getElementById('provider-select');
 
   // Init font size
   let fontSizePx = parseInt(localStorage.getItem(LS_FONTSIZE)) || 32;
@@ -396,12 +407,14 @@
   settingsSave.addEventListener('click', () => {
     localStorage.setItem(LS_LANG, langSelect.value);
     localStorage.setItem(LS_VAD, vadInput.value);
+    localStorage.setItem(LS_PROVIDER, providerSelect.value);
     settingsOverlay.classList.remove('open');
   });
 
   function openSettings() {
-    langSelect.value = localStorage.getItem(LS_LANG) || '';
-    vadInput.value   = localStorage.getItem(LS_VAD)  || '0.8';
+    langSelect.value     = localStorage.getItem(LS_LANG)     || '';
+    vadInput.value       = localStorage.getItem(LS_VAD)      || '0.8';
+    providerSelect.value = localStorage.getItem(LS_PROVIDER) || 'sarvam';
     settingsOverlay.classList.add('open');
   }
 
@@ -423,8 +436,9 @@
       return;
     }
 
-    const lang = localStorage.getItem(LS_LANG) || '';
-    const vad  = localStorage.getItem(LS_VAD)  || '0.8';
+    const lang     = localStorage.getItem(LS_LANG)     || '';
+    const vad      = localStorage.getItem(LS_VAD)      || '0.8';
+    const provider = localStorage.getItem(LS_PROVIDER) || 'sarvam';
 
     // Probe the true native sample rate — browsers often ignore requests for 16 kHz
     // and use the device-native rate (44100 or 48000). Sending audio at the wrong
@@ -434,6 +448,7 @@
     await probeCtx.close();
 
     const params = new URLSearchParams({
+      provider,
       language_code: lang,
       vad_silence_threshold_secs: vad,
       sample_rate: nativeSampleRate,
@@ -588,10 +603,10 @@
       case 'committed_transcript_with_timestamps':
         if (msg.text) commitTranscript(msg.text); break;
       case 'auth_error':
-        showError('ElevenLabs API key is invalid or missing. Set ELEVENLABS_API_KEY on the server.');
+        showError('Provider API key is invalid or missing. Check ELEVENLABS_API_KEY / SARVAM_API_KEY on the server.');
         stopListening(); break;
       case 'quota_exceeded':
-        showError('ElevenLabs quota exceeded. Please check your account.'); stopListening(); break;
+        showError('Provider quota exceeded. Please check your account.'); stopListening(); break;
       case 'error': case 'transcriber_error': case 'input_error':
         showError(msg.message || 'Transcription error.'); break;
     }
