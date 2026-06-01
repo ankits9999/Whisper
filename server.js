@@ -133,7 +133,7 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
   const params = new URLSearchParams({
     'language-code': sarvamLang,
     model: 'saaras:v3',
-    mode: 'transcribe',
+    mode: 'codemix',
     sample_rate: String(SARVAM_TARGET_RATE),
     input_audio_codec: 'wav',
     high_vad_sensitivity: highVad,
