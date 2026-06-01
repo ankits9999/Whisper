@@ -1,41 +1,9 @@
 services:
-  asr:
-    build:
-      context: .
-      dockerfile: asr.Dockerfile
-    ports:
-      - "8765:8765"
-    environment:
-      - ASR_PORT=8765
-      # Tune VAD thresholds for your microphone if needed (Int16 RMS scale 0–32767)
-      # - SPEECH_RMS_THRESHOLD=500
-      # - SILENCE_RMS_THRESHOLD=250
-    volumes:
-      # Persists the downloaded HuggingFace model (~500 MB) across restarts.
-      # Delete this volume to force a fresh model download: docker volume rm whisper_nemo_cache
-      - nemo_cache:/root/.cache
-    healthcheck:
-      # Port 8765 only opens after load_model() finishes — use it as the readiness signal.
-      test: ["CMD", "python", "-c",
-             "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8765)); s.close()"]
-      interval: 15s
-      timeout: 5s
-      retries: 40
-      # Give enough time for a first-run model download (~500 MB) plus load time.
-      start_period: 600s
-    restart: unless-stopped
-
   livecaptions:
     build: .
     ports:
       - "3000:3000"
     environment:
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
       - PORT=3000
-      - ASR_URL=ws://asr:8765
-    depends_on:
-      asr:
-        condition: service_healthy   # wait until the model is loaded and port is open
     restart: unless-stopped
-
-volumes:
-  nemo_cache:
