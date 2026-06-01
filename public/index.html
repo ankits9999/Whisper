@@ -213,7 +213,13 @@
       font-weight: 500;
       color: var(--committed);
       word-wrap: break-word;
+      transition: color 0.4s ease;
     }
+    /* Recency fade: newest committed line is accent yellow, gradient back to white. */
+    #captions .caption-line:not(.partial):nth-last-child(1) { color: var(--accent); }
+    #captions .caption-line:not(.partial):nth-last-child(2) { color: #f0e0a0; }
+    #captions .caption-line:not(.partial):nth-last-child(3) { color: #ddd5b8; }
+    #captions .caption-line:not(.partial):nth-last-child(4) { color: #d0cfcc; }
     .caption-line.partial { color: var(--partial); opacity: 0.85; }
     .caption-line.partial::after { content: '▋'; animation: blink 1s step-end infinite; }
 
