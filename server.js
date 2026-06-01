@@ -134,8 +134,9 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
     model: 'saaras:v3',
     mode: 'transcribe',
     sample_rate: String(SARVAM_TARGET_RATE),
-    input_audio_codec: 'audio/wav',
+    input_audio_codec: 'wav',
     high_vad_sensitivity: highVad,
+    vad_signals: 'true',
   });
   const sarvamUrl = `${SARVAM_WS_URL}?${params.toString()}`;
   // Sarvam accepts auth either as the `Api-Subscription-Key` HTTP header OR
@@ -166,18 +167,20 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
   });
 
   sarvamWs.on('message', (raw) => {
+    const text = raw.toString('utf8');
+    console.log('[Sarvam ←]', text.slice(0, 500));
     let msg;
-    try { msg = JSON.parse(raw.toString('utf8')); } catch { return; }
+    try { msg = JSON.parse(text); } catch { return; }
 
     if (msg.type === 'data' && msg.data && msg.data.transcript) {
-      const text = msg.data.transcript.trim();
-      if (text && clientWs.readyState === WebSocket.OPEN) {
-        clientWs.send(JSON.stringify({ message_type: 'committed_transcript', text }));
+      const transcript = msg.data.transcript.trim();
+      if (transcript && clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({ message_type: 'committed_transcript', text: transcript }));
       }
     } else if (msg.type === 'error') {
       sendError(clientWs, (msg.data && (msg.data.message || msg.data.error)) || 'Sarvam streaming error');
     }
-    // `events` (speech_start / speech_end) are ignored — UI doesn't need them.
+    // `events` (speech_start / speech_end) are logged above but not forwarded.
   });
 
   sarvamWs.on('error', (err) => {
@@ -194,6 +197,31 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
     if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
   });
 
+  // Buffer ~500ms of 16k PCM before flushing one WAV message. Sarvam's VAD
+  // can't do anything useful with 100ms standalone WAV files (each carries
+  // its own RIFF header), so we accumulate and send chunks large enough for
+  // its server-side segmentation to land on real word boundaries.
+  const FLUSH_SAMPLES = SARVAM_TARGET_RATE / 2; // 500ms @ 16k = 8000 samples
+  let pending = [];
+  let pendingLen = 0;
+
+  const flushPending = () => {
+    if (pendingLen === 0 || sarvamWs.readyState !== WebSocket.OPEN) return;
+    const merged = new Int16Array(pendingLen);
+    let off = 0;
+    for (const chunk of pending) { merged.set(chunk, off); off += chunk.length; }
+    pending = [];
+    pendingLen = 0;
+    const wav = pcmToWav(merged, SARVAM_TARGET_RATE);
+    sarvamWs.send(JSON.stringify({
+      audio: {
+        data: wav.toString('base64'),
+        sample_rate: String(SARVAM_TARGET_RATE),
+        encoding: 'audio/wav',
+      }
+    }));
+  };
+
   clientWs.on('message', (data) => {
     if (sarvamWs.readyState !== WebSocket.OPEN) return;
     let msg;
@@ -204,19 +232,15 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
     if (pcmIn.length === 0) return;
 
     const pcm16k = resampleInt16(pcmIn, sampleRate, SARVAM_TARGET_RATE);
-    const wav = pcmToWav(pcm16k, SARVAM_TARGET_RATE);
-    sarvamWs.send(JSON.stringify({
-      audio: {
-        data: wav.toString('base64'),
-        sample_rate: String(SARVAM_TARGET_RATE),
-        encoding: 'audio/wav',
-      }
-    }));
+    pending.push(pcm16k);
+    pendingLen += pcm16k.length;
+    if (pendingLen >= FLUSH_SAMPLES) flushPending();
   });
 
   clientWs.on('close', () => {
     console.log('[Client] Disconnected');
     if (sarvamWs.readyState === WebSocket.OPEN) {
+      try { flushPending(); } catch {}
       try { sarvamWs.send(JSON.stringify({ type: 'flush' })); } catch {}
       sarvamWs.close();
     }
