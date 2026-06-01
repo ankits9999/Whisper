@@ -10,7 +10,9 @@ const wss = new WebSocketServer({ server, path: '/transcribe' });
 
 const PORT = process.env.PORT || 3000;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const SARVAM_API_KEY = process.env.SARVAM_API_KEY;
+// Tolerate users pasting the full subprotocol value (`api-subscription-key.sk_…`)
+// into the env var — strip the prefix so we get the bare key.
+const SARVAM_API_KEY = (process.env.SARVAM_API_KEY || '').replace(/^api-subscription-key\./, '');
 
 const SAMPLE_RATE_FORMAT_MAP = {
   8000:  'pcm_8000',
@@ -136,13 +138,27 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
     high_vad_sensitivity: highVad,
   });
   const sarvamUrl = `${SARVAM_WS_URL}?${params.toString()}`;
-  // Sarvam accepts auth either as an `Api-Subscription-Key` HTTP header OR
+  // Sarvam accepts auth either as the `Api-Subscription-Key` HTTP header OR
   // smuggled through the WebSocket subprotocol field as
-  // `api-subscription-key.<KEY>` — the latter is what their own browser demo
-  // uses (browsers can't set custom WS headers). The subprotocol approach
-  // works equally well server-side and matches their official client, so we
-  // use it here.
-  const sarvamWs = new WebSocket(sarvamUrl, [`api-subscription-key.${SARVAM_API_KEY}`]);
+  // `api-subscription-key.<KEY>` (the trick their own browser demo uses,
+  // because browsers can't set custom WS headers). We send both so it works
+  // no matter which form the server happens to negotiate.
+  const sarvamWs = new WebSocket(
+    sarvamUrl,
+    [`api-subscription-key.${SARVAM_API_KEY}`],
+    { headers: { 'Api-Subscription-Key': SARVAM_API_KEY } }
+  );
+
+  sarvamWs.on('unexpected-response', (_req, res) => {
+    let body = '';
+    res.on('data', (c) => { body += c.toString(); });
+    res.on('end', () => {
+      const msg = `Sarvam handshake failed: HTTP ${res.statusCode} ${body.slice(0, 300)}`;
+      console.error('[Sarvam]', msg);
+      sendError(clientWs, msg);
+      if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
+    });
+  });
 
   sarvamWs.on('open', () => {
     clientWs.send(JSON.stringify({ message_type: 'session_started' }));
@@ -170,7 +186,11 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
   });
 
   sarvamWs.on('close', (code, reason) => {
-    console.log(`[Sarvam] Closed (${code}): ${reason.toString()}`);
+    const r = reason && reason.toString();
+    console.log(`[Sarvam] Closed (${code})${r ? ': ' + r : ''}`);
+    if (code !== 1000 && code !== 1005) {
+      sendError(clientWs, `Sarvam closed (${code})${r ? ': ' + r : ''}`);
+    }
     if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
   });
 
