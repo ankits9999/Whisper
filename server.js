@@ -137,6 +137,13 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
     input_audio_codec: 'wav',
     high_vad_sensitivity: highVad,
     vad_signals: 'true',
+    // Trim end-of-speech detection so segments finalise faster — gives a
+    // more "live" feel at the cost of occasionally splitting on natural
+    // mid-sentence pauses. Frames are 32ms each: 15 negative frames in a
+    // 25-frame window ≈ ~480ms of silence to close a segment.
+    negative_frames_count:  '15',
+    negative_frames_window: '25',
+    min_speech_frames:      '5',
   });
   const sarvamUrl = `${SARVAM_WS_URL}?${params.toString()}`;
   // Sarvam accepts auth either as the `Api-Subscription-Key` HTTP header OR
