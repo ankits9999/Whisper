@@ -138,13 +138,11 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
     input_audio_codec: 'wav',
     high_vad_sensitivity: highVad,
     vad_signals: 'true',
-    // Trim end-of-speech detection so segments finalise faster — gives a
-    // more "live" feel at the cost of occasionally splitting on natural
-    // mid-sentence pauses. Frames are 32ms each: 15 negative frames in a
-    // 25-frame window ≈ ~480ms of silence to close a segment.
-    negative_frames_count:  '15',
-    negative_frames_window: '25',
-    min_speech_frames:      '5',
+    // Ultra-aggressive VAD: finalize after ~250ms of silence. Trade-off is
+    // sentences may split mid-phrase on natural breathing pauses.
+    negative_frames_count:  '8',
+    negative_frames_window: '15',
+    min_speech_frames:      '3',
   });
   const sarvamUrl = `${SARVAM_WS_URL}?${params.toString()}`;
   // Sarvam accepts auth either as the `Api-Subscription-Key` HTTP header OR
@@ -220,7 +218,14 @@ function handleSarvam(clientWs, { languageCode, vadThreshold, sampleRate }) {
     for (const chunk of pending) { merged.set(chunk, off); off += chunk.length; }
     pending = [];
     pendingLen = 0;
-    const wav = pcmToWav(merged, SARVAM_TARGET_RATE);
+
+    // Append 100ms of silence to force VAD segmentation every ~0.5s
+    const silenceSamples = Math.floor(SARVAM_TARGET_RATE * 0.1); // 100ms @ 16kHz = 1600 samples
+    const withSilence = new Int16Array(merged.length + silenceSamples);
+    withSilence.set(merged);
+    // silenceSamples portion is already zero-initialized
+
+    const wav = pcmToWav(withSilence, SARVAM_TARGET_RATE);
     sarvamWs.send(JSON.stringify({
       audio: {
         data: wav.toString('base64'),
