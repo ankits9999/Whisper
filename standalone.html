@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LiveCaptions — Standalone (Sarvam Direct)</title>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --surface2: #1e1e1e;
+      --border: #2a2a2a;
+      --accent: #f5c518;
+      --accent-dim: #c49a10;
+      --text: #f0f0f0;
+      --text-dim: #888;
+      --partial: #a0c4ff;
+      --committed: #ffffff;
+      --green: #4caf50;
+      --red: #f44336;
+      --font-size: 2rem;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    .status-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: background 0.3s;
+      flex-shrink: 0;
+    }
+    .status-dot.connected { background: var(--green); }
+    .status-dot.error     { background: var(--red); }
+    .status-dot.listening { background: var(--accent); animation: pulse 1.5s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.3); }
+    }
+
+    #status-label { font-size: 0.85rem; color: var(--text-dim); white-space: nowrap; }
+
+    .font-controls { display: flex; align-items: center; gap: 6px; }
+    .font-controls span { font-size: 0.8rem; color: var(--text-dim); }
+
+    .icon-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .icon-btn:hover { background: var(--border); }
+
+    #clear-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    #clear-btn:hover { color: var(--text); background: var(--border); }
+
+    #settings-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    #settings-btn:hover { color: var(--text); background: var(--border); }
+
+    #toggle-btn {
+      padding: 8px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 700;
+      transition: all 0.2s;
+      white-space: nowrap;
+      display: flex; align-items: center; gap: 8px;
+    }
+    #toggle-btn.start { background: var(--accent); color: #000; }
+    #toggle-btn.start:hover { background: var(--accent-dim); }
+    #toggle-btn.stop  { background: var(--red); color: #fff; }
+    #toggle-btn.stop:hover { background: #c62828; }
+    #toggle-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Settings modal ── */
+    #settings-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    #settings-overlay.open { display: flex; }
+
+    #settings-modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px;
+      width: 100%; max-width: 460px;
+      margin: 20px;
+    }
+    #settings-modal h2 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 20px;
+      color: var(--accent);
+    }
+
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 6px; }
+    .field select, .field input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 7px;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .field select:focus, .field input:focus { border-color: var(--accent); }
+    .field .hint { font-size: 0.78rem; color: var(--text-dim); margin-top: 5px; }
+
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+    .btn-secondary {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); padding: 8px 16px; border-radius: 7px;
+      cursor: pointer; font-size: 0.9rem; transition: background 0.15s;
+    }
+    .btn-secondary:hover { background: var(--border); }
+    .btn-primary {
+      background: var(--accent); border: none;
+      color: #000; padding: 8px 20px; border-radius: 7px;
+      cursor: pointer; font-size: 0.9rem; font-weight: 700; transition: background 0.15s;
+    }
+    .btn-primary:hover { background: var(--accent-dim); }
+
+    /* ── Caption area ── */
+    #caption-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 30px 40px calc(15vh + env(safe-area-inset-bottom, 0px));
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      scroll-behavior: smooth;
+    }
+    #caption-container::-webkit-scrollbar { width: 6px; }
+    #caption-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    #captions { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 1200px; margin: 0 auto; }
+
+    .caption-line {
+      line-height: 1.4;
+      font-size: var(--font-size);
+      font-weight: 500;
+      color: var(--committed);
+      word-wrap: break-word;
+      transition: color 0.4s ease;
+    }
+    /* Recency fade: newest committed line is accent yellow, gradient back to white. */
+    #captions .caption-line:not(.partial):nth-last-child(1) { color: var(--accent); }
+    #captions .caption-line:not(.partial):nth-last-child(2) { color: #f0e0a0; }
+    #captions .caption-line:not(.partial):nth-last-child(3) { color: #ddd5b8; }
+    #captions .caption-line:not(.partial):nth-last-child(4) { color: #d0cfcc; }
+    .caption-line.partial { color: var(--partial); opacity: 0.85; }
+    .caption-line.partial::after { content: '▋'; animation: blink 1s step-end infinite; }
+
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    #placeholder { text-align: center; color: var(--text-dim); padding: 60px 20px; }
+    #placeholder .big-icon { font-size: 4rem; margin-bottom: 20px; opacity: 0.3; }
+    #placeholder p { font-size: 1.2rem; line-height: 1.6; }
+    #placeholder p.sub { font-size: 0.95rem; margin-top: 10px; opacity: 0.6; }
+
+    #error-toast {
+      display: none;
+      position: fixed; bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      background: #b71c1c; color: #fff;
+      padding: 12px 24px; border-radius: 8px;
+      font-size: 0.95rem; max-width: 90vw; text-align: center;
+      z-index: 100; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+
+    #vol-bar-container { display: flex; align-items: center; gap: 8px; height: 20px; }
+    #vol-bar-container span { font-size: 0.75rem; color: var(--text-dim); }
+    #vol-bar { width: 80px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    #vol-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 3px; transition: width 0.05s; }
+
+    @media (max-width: 600px) {
+      #caption-container { padding: 20px 20px calc(20vh + env(safe-area-inset-bottom, 0px)); }
+      :root { --font-size: 1.4rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+      <line x1="12" y1="19" x2="12" y2="23"/>
+      <line x1="8" y1="23" x2="16" y2="23"/>
+    </svg>
+    LiveCaptions <span style="font-size:0.7rem;opacity:0.6;">(Standalone)</span>
+  </div>
+
+  <div class="controls">
+    <div id="vol-bar-container" style="display:none;">
+      <span>🎙</span>
+      <div id="vol-bar"><div id="vol-fill"></div></div>
+    </div>
+
+    <div class="font-controls">
+      <span>A</span>
+      <button class="icon-btn" id="font-down" title="Smaller text">−</button>
+      <button class="icon-btn" id="font-up"   title="Larger text">+</button>
+    </div>
+
+    <button id="clear-btn">Clear</button>
+    <button id="settings-btn" title="Settings">⚙️</button>
+
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-label">Idle</span>
+
+    <button id="toggle-btn" class="start">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+      Start Listening
+    </button>
+  </div>
+</header>
+
+<div id="settings-overlay">
+  <div id="settings-modal">
+    <h2>⚙️ Settings</h2>
+
+    <div class="field">
+      <label for="lang-select">Language</label>
+      <select id="lang-select">
+        <option value="hi">Hindi + English (codemix)</option>
+        <option value="en">English</option>
+        <option value="bn">Bengali</option>
+        <option value="gu">Gujarati</option>
+        <option value="kn">Kannada</option>
+        <option value="ml">Malayalam</option>
+        <option value="mr">Marathi</option>
+        <option value="ta">Tamil</option>
+        <option value="te">Telugu</option>
+      </select>
+      <p class="hint">Sarvam AI supports 10+ Indic languages with auto language ID.</p>
+    </div>
+
+    <div class="field">
+      <label for="vad-input">Silence threshold (seconds)</label>
+      <input type="number" id="vad-input" value="0.5" min="0.3" max="1.5" step="0.1" />
+      <p class="hint">How long to wait after speech ends before finalising. Lower = faster updates.</p>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-secondary" id="settings-cancel">Cancel</button>
+      <button class="btn-primary"   id="settings-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="caption-container">
+  <div id="captions">
+    <div id="placeholder">
+      <div class="big-icon">👂</div>
+      <p>Press <strong>Start Listening</strong> to begin live captions.</p>
+      <p class="sub">Speak clearly into the microphone — captions will appear here in real time.</p>
+    </div>
+  </div>
+</div>
+
+<div id="error-toast"></div>
+
+<script>
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🔑 PASTE YOUR SARVAM API KEY HERE
+  // ═══════════════════════════════════════════════════════════════════════
+  const SARVAM_API_KEY = 'YOUR_SARVAM_API_KEY_HERE';
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const LS_LANG     = 'livecaptions_lang';
+  const LS_VAD      = 'livecaptions_vad';
+  const LS_FONTSIZE = 'livecaptions_fontsize';
+
+  const SARVAM_WS_URL = 'wss://api.sarvam.ai/speech-to-text/ws';
+  const TARGET_SAMPLE_RATE = 16000;
+  const SAMPLES_PER_CHUNK  = TARGET_SAMPLE_RATE * 0.1; // 100ms
+
+  let ws = null;
+  let mediaStream = null;
+  let audioContext = null;
+  let scriptProcessor = null;
+  let analyser = null;
+  let isListening = false;
+  let partialEl = null;
+  let volAnimFrame = null;
+
+  const toggleBtn       = document.getElementById('toggle-btn');
+  const clearBtn        = document.getElementById('clear-btn');
+  const statusDot       = document.getElementById('status-dot');
+  const statusLabel     = document.getElementById('status-label');
+  const captionsEl      = document.getElementById('captions');
+  const placeholder     = document.getElementById('placeholder');
+  const errorToast      = document.getElementById('error-toast');
+  const fontDownBtn     = document.getElementById('font-down');
+  const fontUpBtn       = document.getElementById('font-up');
+  const volBarContainer = document.getElementById('vol-bar-container');
+  const volFill         = document.getElementById('vol-fill');
+  const container       = document.getElementById('caption-container');
+  const settingsBtn     = document.getElementById('settings-btn');
+  const settingsOverlay = document.getElementById('settings-overlay');
+  const settingsCancel  = document.getElementById('settings-cancel');
+  const settingsSave    = document.getElementById('settings-save');
+  const langSelect      = document.getElementById('lang-select');
+  const vadInput        = document.getElementById('vad-input');
+
+  // Init font size
+  let fontSizePx = parseInt(localStorage.getItem(LS_FONTSIZE)) || 32;
+  applyFontSize(fontSizePx);
+
+  fontDownBtn.addEventListener('click', () => applyFontSize(fontSizePx - 4));
+  fontUpBtn.addEventListener('click',   () => applyFontSize(fontSizePx + 4));
+
+  function applyFontSize(px) {
+    fontSizePx = Math.max(16, Math.min(96, px));
+    document.documentElement.style.setProperty('--font-size', fontSizePx + 'px');
+    localStorage.setItem(LS_FONTSIZE, fontSizePx);
+  }
+
+  clearBtn.addEventListener('click', () => {
+    captionsEl.innerHTML = '';
+    partialEl = null;
+    if (!isListening) showPlaceholder();
+  });
+
+  settingsBtn.addEventListener('click', openSettings);
+  settingsCancel.addEventListener('click', () => settingsOverlay.classList.remove('open'));
+  settingsOverlay.addEventListener('click', (e) => {
+    if (e.target === settingsOverlay) settingsOverlay.classList.remove('open');
+  });
+  settingsSave.addEventListener('click', () => {
+    localStorage.setItem(LS_LANG, langSelect.value);
+    localStorage.setItem(LS_VAD, vadInput.value);
+    settingsOverlay.classList.remove('open');
+  });
+
+  function openSettings() {
+    langSelect.value = localStorage.getItem(LS_LANG) || 'hi';
+    vadInput.value   = localStorage.getItem(LS_VAD)  || '0.5';
+    settingsOverlay.classList.add('open');
+  }
+
+  toggleBtn.addEventListener('click', () => {
+    if (isListening) stopListening();
+    else startListening();
+  });
+
+  async function startListening() {
+    if (!SARVAM_API_KEY || SARVAM_API_KEY === 'YOUR_SARVAM_API_KEY_HERE') {
+      showError('Please set your SARVAM_API_KEY in the HTML file (line 289)');
+      return;
+    }
+
+    toggleBtn.disabled = true;
+    setStatus('connecting', 'Connecting…');
+
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch {
+      showError('Microphone access denied. Please allow microphone access and try again.');
+      setStatus('error', 'No mic access');
+      toggleBtn.disabled = false;
+      return;
+    }
+
+    const lang = localStorage.getItem(LS_LANG) || 'hi';
+    const vad  = parseFloat(localStorage.getItem(LS_VAD) || '0.5');
+    const highVad = vad <= 0.7 ? 'true' : 'false';
+    const sarvamLang = lang === 'hi' ? 'hi-IN' : `${lang}-IN`;
+
+    const params = new URLSearchParams({
+      'language-code': sarvamLang,
+      model: 'saaras:v3',
+      mode: 'codemix',
+      sample_rate: String(TARGET_SAMPLE_RATE),
+      input_audio_codec: 'wav',
+      high_vad_sensitivity: highVad,
+      vad_signals: 'true',
+      negative_frames_count:  '8',
+      negative_frames_window: '15',
+      min_speech_frames:      '3',
+    });
+
+    const wsUrl = `${SARVAM_WS_URL}?${params}`;
+    // Direct browser → Sarvam connection using subprotocol auth
+    ws = new WebSocket(wsUrl, [`api-subscription-key.${SARVAM_API_KEY}`]);
+
+    ws.onopen = () => {
+      setStatus('connected', 'Connected');
+      startMic();
+      isListening = true;
+      toggleBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Stop';
+      toggleBtn.className = 'stop';
+      toggleBtn.disabled = false;
+      setStatus('listening', 'Listening…');
+      hidePlaceholder();
+      volBarContainer.style.display = 'flex';
+      startVolMeter();
+    };
+
+    ws.onmessage = (evt) => handleMessage(JSON.parse(evt.data));
+    ws.onerror = () => { showError('WebSocket error — check your API key.'); stopListening(); };
+    ws.onclose = (evt) => {
+      if (isListening) {
+        setStatus('error', 'Disconnected');
+        stopMic();
+        isListening = false;
+        resetToggleBtn();
+        volBarContainer.style.display = 'none';
+        if (volAnimFrame) cancelAnimationFrame(volAnimFrame);
+        if (evt.code !== 1000) {
+          showError(`Connection closed (code ${evt.code}). Check API key and network.`);
+        }
+      }
+    };
+  }
+
+  function stopListening() {
+    isListening = false;
+    stopMic();
+    if (ws) { ws.close(); ws = null; }
+    setStatus('idle', 'Idle');
+    resetToggleBtn();
+    volBarContainer.style.display = 'none';
+    if (volAnimFrame) cancelAnimationFrame(volAnimFrame);
+    if (partialEl) { partialEl.classList.remove('partial'); partialEl = null; }
+    if (!captionsEl.querySelector('.caption-line')) showPlaceholder();
+  }
+
+  function resetToggleBtn() {
+    toggleBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Start Listening';
+    toggleBtn.className = 'start';
+    toggleBtn.disabled = false;
+  }
+
+  function startMic() {
+    audioContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+    const source = audioContext.createMediaStreamSource(mediaStream);
+    scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    source.connect(scriptProcessor);
+    scriptProcessor.connect(audioContext.destination);
+
+    let pcmBuffer = new Int16Array(0);
+    let pending = [];
+    let pendingLen = 0;
+    const FLUSH_SAMPLES = TARGET_SAMPLE_RATE / 2; // 500ms
+
+    scriptProcessor.onaudioprocess = (e) => {
+      const int16 = float32ToInt16(e.inputBuffer.getChannelData(0));
+      const merged = new Int16Array(pcmBuffer.length + int16.length);
+      merged.set(pcmBuffer);
+      merged.set(int16, pcmBuffer.length);
+      pcmBuffer = merged;
+
+      while (pcmBuffer.length >= SAMPLES_PER_CHUNK) {
+        const chunk = pcmBuffer.slice(0, SAMPLES_PER_CHUNK);
+        pcmBuffer = pcmBuffer.slice(SAMPLES_PER_CHUNK);
+        pending.push(chunk);
+        pendingLen += chunk.length;
+        if (pendingLen >= FLUSH_SAMPLES) flushPending();
+      }
+    };
+
+    function flushPending() {
+      if (pendingLen === 0 || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const merged = new Int16Array(pendingLen);
+      let off = 0;
+      for (const chunk of pending) { merged.set(chunk, off); off += chunk.length; }
+      pending = [];
+      pendingLen = 0;
+
+      // Append 100ms silence to force VAD segmentation
+      const silenceSamples = Math.floor(TARGET_SAMPLE_RATE * 0.1);
+      const withSilence = new Int16Array(merged.length + silenceSamples);
+      withSilence.set(merged);
+
+      const wav = pcmToWav(withSilence, TARGET_SAMPLE_RATE);
+      ws.send(JSON.stringify({
+        audio: {
+          data: wav.toString('base64'),
+          sample_rate: String(TARGET_SAMPLE_RATE),
+          encoding: 'audio/wav',
+        }
+      }));
+    }
+  }
+
+  function stopMic() {
+    if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor = null; }
+    if (audioContext)    { audioContext.close(); audioContext = null; }
+    if (mediaStream)     { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+    analyser = null;
+  }
+
+  function float32ToInt16(f32) {
+    const out = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) {
+      const s = Math.max(-1, Math.min(1, f32[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return out;
+  }
+
+  function pcmToWav(int16, sampleRate) {
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+    const blockAlign = numChannels * bitsPerSample / 8;
+    const dataSize = int16.length * 2;
+    const buf = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buf);
+    const encoder = new TextEncoder();
+
+    const writeString = (offset, str) => {
+      const bytes = encoder.encode(str);
+      for (let i = 0; i < bytes.length; i++) view.setUint8(offset + i, bytes[i]);
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    const samples = new Int16Array(buf, 44);
+    samples.set(int16);
+    return buf;
+  }
+
+  function startVolMeter() {
+    const data = new Uint8Array(analyser ? analyser.frequencyBinCount : 128);
+    function tick() {
+      if (!analyser) return;
+      analyser.getByteFrequencyData(data);
+      volFill.style.width = Math.min(100, data.reduce((a, b) => a + b, 0) / data.length * 2) + '%';
+      volAnimFrame = requestAnimationFrame(tick);
+    }
+    tick();
+  }
+
+  function handleMessage(msg) {
+    if (msg.type === 'data' && msg.data && msg.data.transcript) {
+      commitTranscript(msg.data.transcript.trim());
+    } else if (msg.type === 'error') {
+      showError((msg.data && (msg.data.message || msg.data.error)) || 'Sarvam streaming error');
+    }
+  }
+
+  function commitTranscript(text) {
+    if (!text) return;
+    const line = document.createElement('div');
+    line.className = 'caption-line';
+    line.textContent = text;
+    captionsEl.appendChild(line);
+    scrollToBottom();
+  }
+
+  function setStatus(state, label) {
+    statusDot.className = 'status-dot ' + state;
+    statusLabel.textContent = label;
+  }
+  function scrollToBottom() { container.scrollTop = container.scrollHeight; }
+  function showPlaceholder() {
+    if (!captionsEl.contains(placeholder)) captionsEl.appendChild(placeholder);
+    placeholder.style.display = '';
+  }
+  function hidePlaceholder() { placeholder.style.display = 'none'; }
+
+  let errorTimeout = null;
+  function showError(msg) {
+    errorToast.textContent = msg;
+    errorToast.style.display = 'block';
+    if (errorTimeout) clearTimeout(errorTimeout);
+    errorTimeout = setTimeout(() => { errorToast.style.display = 'none'; }, 8000);
+  }
+</script>
+</body>
+</html>

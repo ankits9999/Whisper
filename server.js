@@ -3,6 +3,7 @@ const express = require('express');
 const { WebSocketServer, WebSocket } = require('ws');
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -26,6 +27,26 @@ const SAMPLE_RATE_FORMAT_MAP = {
 function sampleRateToFormat(rate) {
   return SAMPLE_RATE_FORMAT_MAP[rate] || 'pcm_16000';
 }
+
+// ─── Static pages ────────────────────────────────────────────────────────────
+//
+// Two front-ends ship in this image:
+//   • standalone.html  — talks DIRECTLY to Sarvam from the browser; needs the
+//     API key baked into the page. Served at `/` (and `/standalone.html`) with
+//     the key injected from SARVAM_API_KEY so it works out of the box in Docker.
+//   • public/index.html — talks to this server's `/transcribe` relay. Served at
+//     `/server.html`.
+const standaloneHtml = fs
+  .readFileSync(path.join(__dirname, 'standalone.html'), 'utf8')
+  .replace('YOUR_SARVAM_API_KEY_HERE', SARVAM_API_KEY || 'YOUR_SARVAM_API_KEY_HERE');
+
+app.get(['/', '/standalone.html'], (_req, res) => {
+  res.type('html').send(standaloneHtml);
+});
+
+app.get('/server.html', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 

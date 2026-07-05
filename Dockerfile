@@ -6,6 +6,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY server.js ./
+COPY standalone.html ./
 COPY public/ ./public/
 
 EXPOSE 3000
