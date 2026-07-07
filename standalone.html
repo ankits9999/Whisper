@@ -552,7 +552,7 @@
       const wav = pcmToWav(withSilence, TARGET_SAMPLE_RATE);
       ws.send(JSON.stringify({
         audio: {
-          data: wav.toString('base64'),
+          data: arrayBufferToBase64(wav),
           sample_rate: String(TARGET_SAMPLE_RATE),
           encoding: 'audio/wav',
         }
@@ -608,6 +608,18 @@
     const samples = new Int16Array(buf, 44);
     samples.set(int16);
     return buf;
+  }
+
+  // Browsers have no Buffer.toString('base64'); base64-encode an ArrayBuffer
+  // via btoa, chunking to stay under the argument-count limit of apply().
+  function arrayBufferToBase64(buf) {
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
   }
 
   function startVolMeter() {
